@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""
+Small wrapper around ffmpeg for crop video parts 
+from custom config in format:
+
+=============YDXJ0095.MP4 
+05:40 - 5:52
+8:01 - 8:08
+=============YN010095.MP4
+6:16 - 6:23
+6:56 - 7:02
+=============YN030095.MP4
+0:10 - 0:19
+
+"""
+
+import os
+import argparse
+import logging
+
+__version__ = '1.0.0'
+
+logging.basicConfig()
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+
+
+def ParseError(Exception):
+    pass
+
+
+class Time(object):
+    def __init__(self, in_string_format):
+        # in_string_format "6:16"
+        in_string_format = in_string_format.strip()
+        if ':' not in in_string_format:
+            raise ParseError('":" not found in Time {}'.format(in_string_format))
+
+        self._parts = map(int, in_string_format.split(':'))
+
+    def to_seconds(self):
+        return self._parts[0] * 60 + self._parts[1]
+
+    @classmethod
+    def from_seconds(cls, seconds):
+        minutes = seconds / 60
+        seconds = seconds % 60
+        return Time("{}:{}".format(minutes, seconds))
+
+    def __str__(self):
+        return ':'.join("{}".format(part) for part in self._parts)
+
+
+class Interval():
+    def __init__(self, name, in_string_format):
+        self.name = name
+        self._parse(in_string_format)        
+
+    def _parse(self, in_string_format):
+        # in_string_format "6:16 - 6:23"
+        if '-' not in in_string_format:
+            raise ParseError('"-" not found in Interval {}'.format(in_string_format))
+
+        start, end = in_string_format.split('-')
+        self.start = Time(start)
+        self.end = Time(end)
+
+    def duration(self):
+        start_seconds = self.start.to_seconds()
+        end_seconds = self.end.to_seconds()
+
+        log.debug('start_seconds: {}'.format(start_seconds))
+        log.debug('end_seconds: {}'.format(end_seconds))
+
+        if (end_seconds <= start_seconds):
+            raise ParseError('end_seconds < start_seconds: {} < {}'.format(
+                end_seconds, start_seconds))
+
+        return Time.from_seconds(end_seconds - start_seconds)
+
+    def __str__(self):
+        return "{start} - {end}".format(start=self.start, end=self.end)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config_path', required=True,
+        help='path to cfg')
+    parser.add_argument('--input_path', default='.',
+        help='path to input videos')
+    parser.add_argument('--output_path', default='.',
+        help='path to output videos')
+
+    return parser.parse_args()
+
+
+def parse_intervals(path):
+    if not os.path.exists(path):
+        log.error('Config {} not found'.format(path))
+        return
+
+    name = None
+    for line in open(path):
+        line = line.strip()
+        if line.startswith('='):
+            name = line.strip('=')
+            continue
+
+        if name is None:
+            raise ParseError('Invalid config format: name not specified')
+
+        yield Interval(name, line)
+
+
+def crop(interval, input_path, output_path):
+    log.info('-' * 80)
+    log.info('Cropping {} to {}...'.format(interval, output_path))
+
+    output_name = "{}_{}".format(interval.name, interval.start).replace(':', '_')
+    cmd = "ffmpeg -i '{input_path}/{input_name}' -ss {start} -to {duration} -vcodec copy -acodec copy '{output_path}/{output_name}.mp4'".format(
+        input_path=input_path, output_path=output_path, output_name=output_name,
+        input_name=interval.name, start=interval.start, duration=interval.end)
+    log.debug(cmd)
+
+    os.system(cmd)
+
+
+def main():
+    args = parse_args()
+    output_path = args.output_path
+    input_path = args.input_path
+    
+    if not os.path.exists(output_path):
+        os.system('mkdir -p {}'.format(output_path))
+
+    for interval in parse_intervals(args.config_path):
+        print(interval)
+        crop(interval, input_path, output_path)
+
+
+if __name__ == '__main__':
+    main()
