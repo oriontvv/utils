@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Small wrapper around ffmpeg for crop video parts 
 from custom config in format:
@@ -22,7 +22,7 @@ __version__ = '1.0.0'
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
-log.setLevel(logging.INFO)
+log.setLevel(logging.DEBUG)
 
 
 class ParseError(Exception):
@@ -48,7 +48,7 @@ class Time(object):
         return Time("{}:{}".format(minutes, seconds))
 
     def __str__(self):
-        return ':'.join("{}".format(part) for part in self._parts)
+        return ':'.join(map(str, self._parts))
 
 
 class Interval():
@@ -62,15 +62,16 @@ class Interval():
             raise ParseError('"-" not found in Interval {}'.format(in_string_format))
 
         start, end = in_string_format.split('-')
+
         self.start = Time(start)
         self.end = Time(end)
+
+        log.debug("{}".format(start))
+
 
     def duration(self):
         start_seconds = self.start.to_seconds()
         end_seconds = self.end.to_seconds()
-
-        log.debug('start_seconds: {}'.format(start_seconds))
-        log.debug('end_seconds: {}'.format(end_seconds))
 
         if (end_seconds <= start_seconds):
             raise ParseError('end_seconds < start_seconds: {} < {}'.format(
@@ -79,16 +80,17 @@ class Interval():
         return Time.from_seconds(end_seconds - start_seconds)
 
     def __str__(self):
-        return "{start} - {end}".format(start=self.start, end=self.end)
+        return "[{name}]: {start} - {end}".format(
+            name=self.name, start=self.start, end=self.end)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config_path', required=True,
         help='path to cfg')
-    parser.add_argument('--input_path', default='.',
+    parser.add_argument('--input_path', required=True,
         help='path to input videos')
-    parser.add_argument('--output_path', default='.',
+    parser.add_argument('--output_path', required=True,
         help='path to output videos')
 
     return parser.parse_args()
@@ -116,10 +118,12 @@ def crop(interval, input_path, output_path):
     log.info('-' * 80)
     log.info('Cropping {} to {}...'.format(interval, output_path))
 
+    # import pudb; pu.db
+
     output_name = "{}_{}".format(interval.name, interval.start).replace(':', '_')
-    cmd = "ffmpeg -i '{input_path}/{input_name}' -ss {start} -to {duration} -vcodec copy -acodec copy '{output_path}/{output_name}.mp4'".format(
+    cmd = "ffmpeg -i '{input_path}/{input_name}' -ss {start} -to {end} -vcodec copy -acodec copy '{output_path}/{output_name}.mp4' ".format(
         input_path=input_path, output_path=output_path, output_name=output_name,
-        input_name=interval.name, start=interval.start, duration=interval.end)
+        input_name=interval.name, start=interval.start, end=interval.end)
     log.debug(cmd)
 
     os.system(cmd)
@@ -131,10 +135,9 @@ def main():
     input_path = args.input_path
     
     if not os.path.exists(output_path):
-        os.system('mkdir -p {}'.format(output_path))
+        os.system('mkdir -p "{}"'.format(output_path))
 
     for interval in parse_intervals(args.config_path):
-        print(interval)
         crop(interval, input_path, output_path)
 
 
